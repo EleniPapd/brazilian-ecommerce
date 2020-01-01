@@ -1,0 +1,251 @@
+---
+title: "R Notebook for EMOS. Case study:Brazilian Ecommerce"
+output: html_notebook
+---
+
+Ερώτηση:Να γράψετε κώδικα που να βρίσκει από πόσοι πελάτες της επιχείρησης έχουν δηλώσει τοποθεσία το Ρίο ντε Τζανέιρο
+```{r}
+
+#Ανοίγουμε όλα τα datasets που αφορούν το Brazilian Ecommerce από το kaggle
+
+library(dplyr)
+library(tidyr)
+an_1<-as.data.frame(olist_customers_dataset %>%
+  filter(customer_city=="rio de janeiro") %>%
+  distinct(customer_unique_id) %>%
+  tally())
+print(paste("The number of customers who declared as location Rio de Janeiro was", an_1[1]))
+
+```
+
+Ερώτηση:Να βρείτε το όνομα του πελάτη που πραγματοποίησε σε μία παραγγελία την αγορά των περισσότερων προϊόντων
+```{r}
+an_2<-as.data.frame(olist_order_items_dataset %>%
+  group_by(order_id) %>%
+  tally() %>%
+  arrange(desc(n)) %>%
+  full_join(olist_orders_dataset,by='order_id') %>%
+  select(order_id,n,customer_id) %>%
+  full_join(olist_customers_dataset,by='customer_id') %>%
+  slice(1))
+print(paste("The customer with most of items in one order was",an_2[1,4]))  
+
+
+```
+
+Ερώτηση:Να υπολογίσετε το συνολικό κόστος (αγορα+μεταφορικά) των προϊόντων που αγοράστηκαν από το Sao Paolo
+```{r}
+#Υπολογίζουμε το συνολικό κόστος αθροίζοντας συνολικό κόστος αγοράς και κόστος μεταφοράς.
+a<-olist_order_items_dataset %>%
+  select(order_id,price,freight_value) %>%
+  group_by(order_id) %>%
+  summarise(order_price=sum(price),freight_value_per_order=sum(freight_value)) %>%
+  mutate(total_order_value=order_price+freight_value_per_order) 
+
+#Από άλλo dataset υπολογίζουμε το ποσό πληρωμής για κάθε παραγγελία
+b<-olist_order_payments_dataset %>%
+  group_by(order_id) %>%
+  summarise(order_value=sum(payment_value))
+
+#Ενώνουμε τα δύο datasets
+c<-full_join(a,b,by='order_id')
+
+ 
+an_3<-sum(as.data.frame(olist_customers_dataset %>%
+  filter(customer_city=="sao paulo") %>%
+  select(customer_id) %>%
+  inner_join(olist_orders_dataset,by='customer_id') %>%
+  select(order_id) %>%
+  inner_join(c,by='order_id') %>%
+  mutate(total_cost=coalesce(total_order_value,order_value)))$total_cost) 
+print(paste("The total cost of the products that were bought from Sao Paulo was",an_3))
+
+```
+
+Ερώτηση:Να βρείτε τον τρόπο/τρόπους πληρωμής του πελάτη από το Ρίο ντε Τζανέιριο που είχε τις μεγαλύτερες από πλευράς κόστους αγορές
+```{r}
+#Βρίσκουμε τον πελάτη από το Ρίο ντε Τζανέιρο που είχε τις μεγαλύτερες από πλευράς κόστους αγορές
+d<-as.data.frame(olist_customers_dataset %>%
+  filter(customer_city=="rio de janeiro") %>%
+  select(customer_id,customer_unique_id) %>%
+  inner_join(olist_orders_dataset,by='customer_id') %>%
+  inner_join(c,by='order_id') %>%
+  group_by(customer_unique_id) %>%
+  summarise(order_value_per_customer=sum(order_value)) %>%
+  arrange(desc(order_value_per_customer)) %>%
+  top_n(n=1))
+
+#Βρίσκουμε σε ποια order_ids αντιστοιχεί αυτός ο πελάτης και έπειτα τα payment_types
+an_4<-olist_customers_dataset %>%
+  filter(customer_unique_id==d[1,1]) %>%
+  inner_join(olist_orders_dataset,by='customer_id') %>%
+  inner_join(olist_order_payments_dataset,by='order_id') %>%
+  select(payment_type)
+print(paste("The client, from Rio de Janeiro with the most expensive purchases, payed with",an_4))
+
+```
+
+Ερώτηση:Να βρείτε σε ποια ημερομηνία πραγματοποιήθηκαν οι περισσότερες αγορές σε μία μέρα
+```{r}
+an_5<-as.data.frame(olist_orders_dataset %>%
+  select(order_purchase_timestamp) %>%
+  mutate(date_of_purchase=format(as.POSIXct(strptime(order_purchase_timestamp,"%Y-%m-%d %H:%M:%S",tz="")) ,format = "%d-%m-%Y")) %>%
+  select(date_of_purchase) %>%
+  group_by(date_of_purchase) %>%
+  tally() %>%
+  arrange(desc(n)) %>%
+  top_n(n=1))
+print(paste("The most of purchases in the same day became at",an_5[1,1]))  
+
+```
+
+Ερώτηση:Να βρείτε σε ποιον μήνα πραγματοποιήθηκε η μεγαλύτερη εισροή εσόδων για την επιχείρηση
+```{r}
+an_6<-as.data.frame(full_join(c,olist_orders_dataset,by='order_id') %>%
+  separate(order_delivered_customer_date, into = c("Date", "Time"), sep = " ") %>%
+  separate(Date, into = c("Year","Month", "Day"), sep = "-") %>%
+  select(Month,order_value) %>%
+  mutate(Month=month.name[as.numeric(Month)]) %>%
+  group_by(Month) %>%
+  na.omit() %>%
+  summarise(revenue_per_month=sum(order_value)) %>%
+  arrange(desc(revenue_per_month)) %>%
+  top_n(n=1))
+print(paste("The month, with the biggest revenue, was",an_6[1,1]))
+
+
+```
+
+Ερώτηση:Να εμφανίσετε την κατηγορία προϊόντος για κάθε έ
+να από τα προϊόντα που δεν παραδόθηκαν και που δεν απεστάλθηκαν
+```{r}
+an_7<-olist_orders_dataset %>%
+  filter(order_status!="delivered",order_status!="shipped") %>%
+  select(order_id) %>%
+  inner_join(olist_order_items_dataset,by='order_id') %>%
+  group_by(product_id) %>%
+  summarise(no_items_per_product=n()) %>%
+  inner_join(olist_products_dataset,by='product_id') %>%
+  left_join(product_category_name_translation,by='product_category_name') %>%
+  select(product_id,no_items_per_product,product_category_name,product_category_name_english)
+
+print("The product category name, for each product which wasn't delivered, nor shipped, was:") 
+an_7
+```
+
+Ερώτηση: Ποια ήταν η πόλη του πιο δημοφιλούς(αριθμός πωλήσεων) seller;
+```{r}
+an_8<-olist_order_items_dataset %>%
+  group_by(seller_id) %>%
+  summarise(number_of_sales_per_seller=n()) %>%
+  arrange(desc(number_of_sales_per_seller)) %>%
+  top_n(n=1) %>%
+  inner_join(olist_sellers_dataset,by='seller_id') %>%
+  select(seller_city)
+print(paste("The city of the most famous seller is",an_8))
+
+```
+
+Ερώτηση:Να βρείτε τα δύο προϊόντα με τις μεγαλύτερες σε πλήθος πωλήσεις που είχαν περισσότερες από 3 φωτογραφίες στην περιγραφή τους
+```{r}
+an_9<-as.data.frame(olist_order_items_dataset %>%
+  group_by(product_id) %>%
+  summarise(number_of_sales_per_product=n()) %>%
+  arrange(desc(number_of_sales_per_product)) %>%
+  inner_join(olist_products_dataset,by='product_id') %>%
+  filter(product_photos_qty>3) %>%
+  slice(1:2) %>%
+  select(product_id,number_of_sales_per_product,product_photos_qty))
+
+print(paste("The first two products with most of sales and with more than 3 photos in their description were",an_9[1,1],"and",an_9[2,1]))
+
+
+```
+
+Ερώτηση:Να βρείτε την κατηγορία προϊόντων που είχε τον καλύτερο μέσο όρο αξιολογήσεων
+```{r}
+
+an_10<-olist_order_items_dataset %>%
+  inner_join(olist_products_dataset,by='product_id') %>%
+  full_join(olist_order_reviews_dataset,by='order_id') %>%
+  group_by(product_category_name) %>%
+  summarise(mean_review_per_product_category=mean(review_score)) %>%
+  na.omit() %>%
+  arrange(desc(mean_review_per_product_category)) %>%
+  left_join(product_category_name_translation,by='product_category_name') %>%
+  slice(1) %>%
+  nth(n=3)
+  
+print(paste("The category of products with the best average score review was",an_10)) 
+
+```
+
+Ερώτηση: Να υπολογίσετε το εβδομαδιαίο έσοδο αγορών της κατηγορίας esporte_lazer για τους Καλοκαιρινούς μήνες 
+```{r}
+e<-olist_order_items_dataset %>%
+  mutate(total_cost_per_item=price+freight_value) %>%
+  left_join(olist_orders_dataset,by='order_id') %>%
+  select(order_id,order_item_id,product_id,order_delivered_customer_date,total_cost_per_item) %>%
+  left_join(olist_products_dataset,by='product_id') %>%
+  filter(product_category_name=="esporte_lazer") %>%
+  separate (order_delivered_customer_date, into = c("Date", "Time"), sep = " ") %>%
+  separate(Date, into = c("Year","Month", "Day"), sep = "-") %>%
+  filter(Month %in% c("06","07","08")) %>%
+  mutate(Month=month.name[as.numeric(Month)],Day=as.numeric(Day))
+
+for(i in 1:dim(e)[1]){
+  if(e$Day[i] %in% 1:7){
+    e$Week[i]<-1
+  }
+  else if(e$Day[i] %in% 8:14){
+    e$Week[i]<-2
+  }
+  else if(e$Day[i] %in% 15:21){
+    e$Week[i]<-3
+  }
+  else if(e$Day[i] %in% 22:28){
+    e$Week[i]<-4
+  }
+  else {
+    e$Week[i]<-5
+  }
+}
+
+  an_11<-e %>% group_by(Month,Week) %>%
+  summarise(revenue_per_week=sum(total_cost_per_item))
+
+  print(paste("The weeekly revenue of sales of products in category 'esporte lazer' for the months of summer are:"))
+  an_11
+```
+
+Ερώτηση:Να βρείτε σε ποια κατηγορία προϊόντος αγοράζουν περισσότερο με την χρήση του τρόπου boleto στην περιοχή MG
+```{r}
+ f<-olist_order_payments_dataset %>%
+    filter(payment_type=="boleto") %>%
+    left_join(olist_orders_dataset,by='order_id') %>%
+   left_join(olist_customers_dataset,by='customer_id') %>%
+   filter(customer_state=="MG") %>%
+   select(order_id,payment_sequential,payment_value) %>%
+   full_join(a,by='order_id') %>%
+   mutate(dif=payment_value-total_order_value) %>%
+   na.omit() %>%
+   filter(abs(dif)>1) #καταλαβαίνουμε ότι παίρνουμε όλα τα προϊόντα που αφορούν τις παραπάνω παραγγελίες
+  
+ an_12<-as.data.frame(olist_order_payments_dataset %>%
+   filter(payment_type=="boleto") %>%
+   left_join(olist_orders_dataset,by='order_id') %>%
+   left_join(olist_customers_dataset,by='customer_id') %>%
+   filter(customer_state=="MG") %>%
+   select(order_id) %>%
+   inner_join(olist_order_items_dataset,by='order_id') %>%
+   left_join(olist_products_dataset,by='product_id') %>%
+   group_by(product_category_name) %>%
+   tally() %>%
+   arrange(desc(n)) %>%
+   left_join(product_category_name_translation,by='product_category_name'))
+
+ print(paste("The category of products, with most of sales, which became with boleto and in MG, is",an_12[1,3]))
+ 
+```
+
+
